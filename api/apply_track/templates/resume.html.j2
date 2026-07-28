@@ -4,15 +4,32 @@
 <meta charset="utf-8">
 <title>{{ r.basics.name or "Resume" }}</title>
 <style>
-  /* Font stacks deliberately limited to families present on both macOS and
-     Windows, so the same JSON renders the same on either machine. */
+  /* Sizes and spacing follow mainstream resume formatting guidance: name
+     18-24pt, section headings 12-14pt bold, body 10-12pt, margins 0.5-1in,
+     line spacing 1.0-1.15, at most two font families, single column.
+
+     Font stacks are restricted to families that ship stock on BOTH macOS and
+     Windows, so the same JSON renders the same on either machine. Calibri,
+     Cambria, Garamond and Aptos are all recommended for resumes but arrive
+     with Microsoft Office rather than the OS, so they are not safe defaults.
+     Georgia is deliberately avoided: its digits are old-style figures that sit
+     at x-height, which makes dates and metrics look misaligned. */
   @page { size: {{ page_size }}; margin: {{ margin }}; }
 
   :root {
+{% if font == "serif" %}
+    --font: "Times New Roman", Times, serif;
+{% else %}
+    --font: Helvetica, Arial, sans-serif;
+{% endif %}
     --ink: #111;
-    --muted: #4a4a4a;
-    --rule: #b8b8b8;
+    --muted: #444;
+    --rule: #9a9a9a;
     --body: 10.5pt;
+    /* Guidance puts resume line spacing at 1.0-1.15. Separation between
+       entries comes from .item margins instead, so lines inside a bullet stay
+       tight and more content fits the page. */
+    --lh: 1.15;
   }
 
   * { box-sizing: border-box; }
@@ -20,56 +37,52 @@
   html, body { margin: 0; padding: 0; }
 
   body {
-    font-family: Georgia, "Times New Roman", serif;
+    font-family: var(--font);
     font-size: var(--body);
-    line-height: 1.4;
+    line-height: var(--lh);
     color: var(--ink);
+    /* Lining figures where the family offers a choice, so digits align. */
+    font-variant-numeric: lining-nums tabular-nums;
     -webkit-font-smoothing: antialiased;
   }
 
-  /* Only applies to the on-screen preview; @page owns the PDF margins. */
-  .sheet { max-width: 7.5in; margin: 0 auto; padding: 0; }
+  /* Screen-only: mimic a sheet of paper. @page owns the real PDF margins. */
+  .sheet { max-width: 7.4in; margin: 0 auto; }
   @media screen {
     body { background: #f2f2f2; padding: 24px 12px; }
-    .sheet { background: #fff; padding: 0.6in 0.7in; box-shadow: 0 1px 6px rgba(0,0,0,.18); }
+    .sheet { background: #fff; padding: 0.55in 0.6in; box-shadow: 0 1px 6px rgba(0,0,0,.18); }
   }
 
-  header { margin-bottom: 10pt; }
+  header { margin-bottom: 11pt; }
 
   h1 {
-    font-family: Arial, Helvetica, sans-serif;
-    font-size: 19pt;
-    letter-spacing: .01em;
-    margin: 0 0 2pt;
+    font-size: 20pt;
+    line-height: 1.1;
+    letter-spacing: -0.01em;
+    margin: 0 0 3pt;
     font-weight: 700;
   }
 
   .headline {
-    font-family: Arial, Helvetica, sans-serif;
-    font-size: 10.5pt;
+    font-size: 11pt;
     color: var(--muted);
     margin: 0 0 4pt;
   }
 
-  .contact {
-    font-family: Arial, Helvetica, sans-serif;
-    font-size: 9pt;
-    color: var(--muted);
-  }
+  .contact { font-size: 9.5pt; color: var(--muted); }
   .contact span + span::before { content: "  •  "; color: var(--rule); }
   .contact a { color: inherit; text-decoration: none; }
 
-  .summary { margin: 8pt 0 0; }
+  .summary { margin: 7pt 0 0; }
 
   h2 {
-    font-family: Arial, Helvetica, sans-serif;
-    font-size: 10pt;
+    font-size: 12pt;
     text-transform: uppercase;
-    letter-spacing: .09em;
+    letter-spacing: .06em;
     font-weight: 700;
-    margin: 13pt 0 5pt;
+    margin: 12pt 0 5pt;
     padding-bottom: 2pt;
-    border-bottom: .75pt solid var(--rule);
+    border-bottom: 1pt solid var(--rule);
     /* Never strand a heading alone at the foot of a page. */
     break-after: avoid;
     page-break-after: avoid;
@@ -77,9 +90,9 @@
 
   section { break-inside: auto; }
 
-  /* A long entry must be allowed to flow across a page boundary. Making the
-     whole .item unbreakable meant anything taller than the remaining space got
-     pushed wholesale to the next page, leaving inches of blank paper behind. */
+  /* A long entry must be allowed to flow across a page boundary. Marking the
+     whole .item unbreakable meant anything taller than the space left got
+     pushed wholesale to the next page, leaving inches of blank paper. */
   .item { margin-bottom: 7pt; break-inside: auto; }
   .item:last-child { margin-bottom: 0; }
 
@@ -97,11 +110,12 @@
   .item-title { font-weight: 700; }
   .item-title a { color: inherit; text-decoration: none; }
 
-  .item-sub { font-style: italic; color: var(--muted); }
+  /* Employer is load-bearing information, so it stays upright rather than
+     italic -- ATS guidance advises against italics for important fields. */
+  .item-sub { color: var(--muted); }
 
   .item-meta {
-    font-family: Arial, Helvetica, sans-serif;
-    font-size: 9pt;
+    font-size: 9.5pt;
     color: var(--muted);
     white-space: nowrap;
     flex-shrink: 0;
@@ -109,19 +123,41 @@
 
   .item-desc { margin: 2pt 0 0; }
 
-  ul { margin: 3pt 0 0; padding-left: 15pt; break-inside: auto; }
-  /* Chromium ignores orphans/widows, so guard the unit we actually care about:
-     a single bullet must never be torn across two pages. */
+  ul { margin: 2pt 0 0; padding-left: 14pt; break-inside: auto; }
+  /* Chromium ignores the orphans and widows properties, so guard the unit that
+     actually matters: a single bullet must never be torn across two pages. */
   li { margin-bottom: 1.5pt; break-inside: avoid; page-break-inside: avoid; }
   li:last-child { margin-bottom: 0; }
 
-  .tags { margin-top: 1pt; }
-  .tag-group { display: flex; gap: 6pt; }
+  .tag-group { display: flex; gap: 5pt; }
   .tag-label { font-weight: 700; white-space: nowrap; }
+
+  /* Repeating continuation header. A thead is the one construct Chromium
+     repeats across page breaks; Chromium has no @page margin boxes. Table
+     structure does not survive into an untagged PDF, so a parser sees plain
+     positioned text rather than a table. Convention: one line, smaller than
+     the page-1 name, carrying name + one contact + "Page N of M". */
+  table.flow { width: 100%; border-collapse: collapse; }
+  table.flow > tbody > tr > td { padding: 0; }
+  .runhead {
+    font-size: 9pt;
+    font-weight: 400;
+    color: var(--muted);
+    text-align: left;
+    padding: 0 0 5pt;
+    border-bottom: 0.5pt solid var(--rule);
+  }
 </style>
 </head>
 <body>
 <div class="sheet">
+{% if running_header %}
+<table class="flow">
+  <thead>
+    <tr><th class="runhead">{{ running_header }}</th></tr>
+  </thead>
+  <tbody><tr><td>
+{% endif %}
 
   <header>
     {% if r.basics.name %}<h1>{{ r.basics.name }}</h1>{% endif %}
@@ -143,7 +179,7 @@
 
     {% if s.kind == "skills" %}
       {% for item in s.items %}
-      <div class="item tags">
+      <div class="item">
         {% if item.tags %}
           <div class="tag-group">
             {% if item.title %}<span class="tag-label">{{ item.title }}:</span>{% endif %}
@@ -189,6 +225,10 @@
   </section>
   {% endfor %}
 
+{% if running_header %}
+  </td></tr></tbody>
+</table>
+{% endif %}
 </div>
 </body>
 </html>

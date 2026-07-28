@@ -120,6 +120,47 @@ def test_no_page_ends_with_a_large_blank_gap(long_pdf: Path):
     assert holes == [], f"pages with a large trailing gap (page, pt): {holes}"
 
 
+def _topmost_lines(path: Path, page_index: int, below_pt: float = 30.0) -> list[str]:
+    """Text near the very top of a page, which is where the running header sits."""
+    doc = pymupdf.open(path)
+    page = doc[page_index]
+    out = []
+    for block in page.get_text("dict")["blocks"]:
+        for line in block.get("lines", []):
+            if line["bbox"][1] < below_pt:
+                text = "".join(s["text"] for s in line["spans"]).strip()
+                if text:
+                    out.append(text)
+    doc.close()
+    return out
+
+
+def test_continuation_pages_carry_a_running_header(long_pdf: Path):
+    """Convention: name, one contact point and a page number on every page."""
+    pages = _pages(long_pdf)
+    assert len(pages) > 1
+
+    for index in range(len(pages)):
+        head = " ".join(_topmost_lines(long_pdf, index))
+        assert "Long Resume" in head, f"page {index + 1} header lacks the name: {head!r}"
+        assert f"Page {index + 1} of {len(pages)}" in head, (
+            f"page {index + 1} header lacks a page number: {head!r}"
+        )
+
+
+def test_a_single_page_resume_gets_no_running_header(sample_resume: dict):
+    """The header would be noise on a one-pager, so it is only added when needed."""
+    pdf = _render(ResumeJSON.model_validate(sample_resume), "test-pagination-single.pdf")
+
+    doc = pymupdf.open(pdf)
+    page_count = len(doc)
+    doc.close()
+    assert page_count == 1
+
+    head = " ".join(_topmost_lines(pdf, 0))
+    assert "Page 1 of" not in head, f"unexpected running header on a one-pager: {head!r}"
+
+
 def test_an_entry_taller_than_a_page_still_flows(long_pdf: Path):
     """One huge entry must split across pages rather than blank out a page."""
     pdf = _render(_resume(1, 30), "test-pagination-huge-item.pdf")

@@ -114,6 +114,7 @@ export default function Composer() {
   const [previewVersion, setPreviewVersion] = useState(0);
   const [drawerTarget, setDrawerTarget] = useState<string | null>(null);
   const [showJd, setShowJd] = useState(false);
+  const [jd, setJd] = useState("");
   const [notice, setNotice] = useState<{ kind: string; text: string } | null>(null);
   const timer = useRef<number | null>(null);
 
@@ -138,6 +139,27 @@ export default function Composer() {
       setSavedSnapshot(JSON.stringify(variant.data.data));
     }
   }, [variant.data, draft]);
+
+  // Keep the JD box in step with whatever the server holds.
+  useEffect(() => {
+    if (application.data) setJd(application.data.job_description);
+  }, [application.data]);
+
+  const saveJd = useMutation({
+    mutationFn: () => api.patchApplication(appId, { job_description: jd }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["application", appId] });
+      queryClient.invalidateQueries({ queryKey: ["applications"] });
+      setNotice({ kind: "info", text: "Job description saved." });
+    },
+    onError: (err) =>
+      setNotice({
+        kind: "bad",
+        text: `Could not save the job description: ${
+          err instanceof ApiError ? err.message : String(err)
+        }`,
+      }),
+  });
 
   const dirty = useMemo(
     () => draft !== null && JSON.stringify(draft) !== savedSnapshot,
@@ -318,8 +340,8 @@ export default function Composer() {
 
         {notice && <div className={`banner ${notice.kind}`}>{notice.text}</div>}
 
-        {app.job_description && (
-          <div className="card tight">
+        <div className="card tight">
+          <div className="actions">
             <button
               type="button"
               className="ghost small"
@@ -327,21 +349,42 @@ export default function Composer() {
             >
               {showJd ? "Hide" : "Show"} job description
             </button>
-            {showJd && (
-              <pre
-                className="small muted"
-                style={{
-                  whiteSpace: "pre-wrap",
-                  marginBottom: 0,
-                  maxHeight: 260,
-                  overflow: "auto",
-                }}
-              >
-                {app.job_description}
-              </pre>
-            )}
+            <span className="muted small">
+              {app.job_description
+                ? `${app.job_description.length} chars`
+                : "none saved yet"}
+            </span>
           </div>
-        )}
+          {showJd && (
+            <>
+              <textarea
+                className="small"
+                value={jd}
+                placeholder="Paste the job description here to keep it beside you while you tailor."
+                style={{ minHeight: 190, marginTop: 8 }}
+                onChange={(e) => setJd(e.target.value)}
+              />
+              <div className="actions" style={{ marginTop: 6 }}>
+                <button
+                  type="button"
+                  disabled={jd === app.job_description || saveJd.isPending}
+                  onClick={() => saveJd.mutate()}
+                >
+                  {saveJd.isPending ? "Saving…" : "Save job description"}
+                </button>
+                {jd !== app.job_description && (
+                  <button
+                    type="button"
+                    className="ghost small"
+                    onClick={() => setJd(app.job_description)}
+                  >
+                    Revert
+                  </button>
+                )}
+              </div>
+            </>
+          )}
+        </div>
 
         <div className="card">
           <label className="field" style={{ marginBottom: 0 }}>
