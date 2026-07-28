@@ -121,7 +121,9 @@
     flex-shrink: 0;
   }
 
-  .item-desc { margin: 2pt 0 0; }
+  /* pre-line keeps the paragraph breaks when an entry's prose spans more than
+     one paragraph, without letting a long line overflow the column. */
+  .item-desc { margin: 2pt 0 0; white-space: pre-line; }
 
   ul { margin: 2pt 0 0; padding-left: 14pt; break-inside: auto; }
   /* Chromium ignores the orphans and widows properties, so guard the unit that
