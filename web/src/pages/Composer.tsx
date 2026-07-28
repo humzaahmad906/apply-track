@@ -9,6 +9,7 @@ import {
   type ResumeJSON,
   type SectionKind,
 } from "../api/client";
+import ReadingPanel from "../components/ReadingPanel";
 import { BasicsFields, SectionList } from "../components/ResumeFields";
 
 const AUTOSAVE_MS = 1200;
@@ -385,6 +386,11 @@ export default function Composer() {
             </>
           )}
         </div>
+
+        <ReadingPanel
+          applicationId={appId}
+          hasJd={Boolean(app.job_description.trim())}
+        />
 
         <div className="card">
           <label className="field" style={{ marginBottom: 0 }}>

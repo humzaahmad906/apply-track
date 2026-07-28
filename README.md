@@ -14,7 +14,41 @@ Two flows:
    Rendering JSON to a resume is fully deterministic — one template, same output
    every time.
 
+Alongside those, **recommended reading**: for any application with a job
+description saved, it compares that JD against the resume you are about to send
+and recommends lessons from a course repo for whatever is missing.
+
 Runs on macOS and Windows.
+
+## Recommended reading
+
+Lessons are indexed from a GitHub repo laid out as `content/<course>/NN-slug.md`
+— by default [`applied-ml-academy`](https://github.com/humzaahmad906/applied-ml-academy),
+changeable with `APPLY_TRACK_COURSE_REPO`. Only the repo's tree listing is
+fetched, never the lesson files, and the index is cached in `data/courses.json`.
+Refresh it from the Library page.
+
+Open a composer, save a job description, and hit **Analyse this job**. One CLI
+call receives the JD, the variant's resume and the whole lesson catalogue, then
+sorts every requirement into three buckets:
+
+- **Recommended reading** — the job wants it and the resume shows nothing.
+  These are the only entries that get lesson links.
+- **Already covered** — the job wants it and the resume proves it, with the role
+  or project named. This is your list of bullets to switch on.
+- **Basics** — foundational requirements noted and deliberately excluded, so a
+  senior engineer is never told to read an intro to Python.
+
+Two deliberate constraints:
+
+- **The reading list never reaches the PDF.** It is a list of things you cannot
+  yet claim; printing that would work against you.
+- **Lesson titles and URLs come from the local index, never the model.** Cited
+  paths are checked against the real catalogue and anything invented is dropped,
+  so a hallucinated path cannot become a dead link.
+
+Results are saved per application, so reopening a composer is instant and free.
+Editing the JD or the resume marks the analysis out of date and offers a refresh.
 
 ## Requirements
 
@@ -124,6 +158,9 @@ Environment variables, all optional:
 | `APPLY_TRACK_CLAUDE_BIN` | *(found on PATH)* | Full path to the `claude` binary |
 | `APPLY_TRACK_PARSE_TIMEOUT` | `240` | Seconds to allow one parse |
 | `APPLY_TRACK_DATA` | `./data` | Where the DB, uploads and exports live |
+| `APPLY_TRACK_COURSE_REPO` | `humzaahmad906/applied-ml-academy` | Repo the reading recommendations come from |
+| `APPLY_TRACK_COURSE_BRANCH` | `main` | Branch to index |
+| `APPLY_TRACK_GAP_TIMEOUT` | `420` | Seconds to allow one gap analysis |
 
 ## Tests
 

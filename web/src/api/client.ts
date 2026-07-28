@@ -145,6 +145,42 @@ export interface LibraryRow {
   created_at: string;
 }
 
+export interface Reading {
+  path: string;
+  title: string;
+  url: string;
+  course: string;
+}
+
+export interface Gap {
+  skill: string;
+  why: string;
+  lessons: Reading[];
+}
+
+export interface CoveredSkill {
+  skill: string;
+  evidence: string;
+}
+
+/** JD-versus-resume comparison. Study aid only — never rendered into the PDF. */
+export interface ReadingList {
+  application_id: number;
+  created_at: string;
+  lesson_count: number;
+  stale: boolean;
+  gaps: Gap[];
+  covered: CoveredSkill[];
+  basics: string[];
+  note: string;
+}
+
+export interface CourseIndex {
+  lesson_count: number;
+  courses: Record<string, number>;
+  indexed: boolean;
+}
+
 export interface Health {
   ok: boolean;
   claude_cli: string | null;
@@ -260,6 +296,17 @@ export const api = {
     const match = /filename="?([^"]+)"?/.exec(disposition);
     return { blob: await res.blob(), filename: match?.[1] ?? "resume.pdf" };
   },
+
+  // --- recommended reading ------------------------------------------------
+  courseIndex: () => request<CourseIndex>("/api/courses"),
+  refreshCourses: () =>
+    request<CourseIndex>("/api/courses/refresh", { method: "POST" }),
+  reading: (applicationId: number) =>
+    request<ReadingList>(`/api/applications/${applicationId}/reading`),
+  runReading: (applicationId: number) =>
+    request<ReadingList>(`/api/applications/${applicationId}/reading`, {
+      method: "POST",
+    }),
 
   // --- reusable items -----------------------------------------------------
   listLibrary: () => request<LibraryRow[]>("/api/library"),

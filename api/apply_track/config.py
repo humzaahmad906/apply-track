@@ -21,6 +21,13 @@ PARSE_TIMEOUT = int(os.environ.get("APPLY_TRACK_PARSE_TIMEOUT", "240"))
 # Explicit override, e.g. APPLY_TRACK_CLAUDE_BIN=C:\Users\me\claude.exe
 CLAUDE_BIN = os.environ.get("APPLY_TRACK_CLAUDE_BIN", "")
 
+# Course repository the gap analysis recommends reading from.
+COURSE_REPO = os.environ.get("APPLY_TRACK_COURSE_REPO", "humzaahmad906/applied-ml-academy")
+COURSE_BRANCH = os.environ.get("APPLY_TRACK_COURSE_BRANCH", "main")
+
+# Gap analysis sends the whole lesson catalogue, so it needs a longer budget.
+GAP_TIMEOUT = int(os.environ.get("APPLY_TRACK_GAP_TIMEOUT", "420"))
+
 CORS_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",

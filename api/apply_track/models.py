@@ -68,6 +68,22 @@ class Variant(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=utcnow)
 
 
+class GapAnalysis(SQLModel, table=True):
+    """Saved JD-versus-resume comparison for one application.
+
+    source_hash covers the job description plus the resume it was run against,
+    so the UI can say the analysis is out of date instead of quietly showing a
+    stale one.
+    """
+
+    id: int | None = Field(default=None, primary_key=True)
+    application_id: int = Field(foreign_key="application.id", unique=True, index=True)
+    source_hash: str = ""
+    lesson_count: int = 0
+    data: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=utcnow)
+
+
 class LibraryItem(SQLModel, table=True):
     """A reusable Item -- a capstone project, a role, a skill group.
 

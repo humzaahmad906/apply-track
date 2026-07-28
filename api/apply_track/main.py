@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import CORS_ORIGINS, PARSE_MODEL, ClaudeCliNotFound, find_claude
 from .db import init_db
-from .routers import applications, library, resumes, variants
+from .routers import applications, coach, library, resumes, variants
 
 logging.basicConfig(
     level=logging.INFO,
@@ -45,6 +45,7 @@ app.include_router(resumes.router)
 app.include_router(applications.router)
 app.include_router(variants.router)
 app.include_router(library.router)
+app.include_router(coach.router)
 
 
 @app.get("/api/health")
