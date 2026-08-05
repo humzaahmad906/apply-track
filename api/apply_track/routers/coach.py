@@ -1,13 +1,16 @@
 """Recommended reading: what this job wants that this resume does not show.
 
+Nothing here is a button any more. Saving a job description or editing a resume
+schedules the analysis, and this router reports whatever the background queue
+has produced -- plus a force-refresh for when you want it right now.
+
 Deliberately never touches the rendered resume. The gap list is a list of things
-the candidate does not know yet, which is the last thing you would print on a
+the candidate cannot claim yet, which is the last thing you would print on a
 resume you are about to send.
 """
 
 from __future__ import annotations
 
-import hashlib
 import logging
 from typing import Any
 
@@ -16,43 +19,46 @@ from sqlmodel import Session, select
 
 from ..courses import CourseIndexError, courses, get_index, load_cached
 from ..db import get_session
-from ..gap import GapError, analyse
-from ..models import Application, GapAnalysis, Variant, utcnow
+from ..gap import GapResult, source_hash
+from ..models import Application, GapAnalysis, Variant
 from ..schemas import ResumeJSON
+from ..tasks import analyse_now, queue
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["coach"])
 
 
-def _resume_for(session: Session, application_id: int) -> ResumeJSON:
-    """The variant if one exists, since that is what will actually be sent."""
+def _current_hash(session: Session, app: Application) -> str:
+    """Hash of what an analysis would run against right now.
+
+    Empty when there is no variant yet, which simply means nothing can be out
+    of date.
+    """
     variant = session.exec(
-        select(Variant).where(Variant.application_id == application_id)
+        select(Variant).where(Variant.application_id == app.id)
     ).first()
     if variant is None:
-        raise HTTPException(
-            404,
-            "Compose a resume for this application first — the analysis compares "
-            "the job description against the resume you intend to send.",
-        )
-    return ResumeJSON.model_validate(variant.data or {})
+        return ""
+    resume = ResumeJSON.model_validate(variant.data or {})
+    return source_hash(app.job_description, resume)
 
 
-def _source_hash(job_description: str, resume: ResumeJSON) -> str:
-    digest = hashlib.sha256()
-    digest.update(job_description.strip().encode("utf-8"))
-    digest.update(resume.model_dump_json().encode("utf-8"))
-    return digest.hexdigest()[:16]
-
-
-def _out(row: GapAnalysis, current_hash: str) -> dict[str, Any]:
+def _out(row: GapAnalysis, current_hash: str, state: str) -> dict[str, Any]:
+    # Validate on the way out, never hand back the raw stored blob. Analyses
+    # saved under an older shape -- basics as bare strings, no lessons on
+    # covered -- are normalised here rather than reaching the UI half-formed.
+    analysis = GapResult.model_validate(row.data or {}).model_dump()
     return {
         "application_id": row.application_id,
         "created_at": row.created_at,
         "lesson_count": row.lesson_count,
-        # Lets the UI offer a refresh instead of presenting old advice as current.
-        "stale": row.source_hash != current_hash,
-        **(row.data or {}),
+        # No hash means there is nothing to compare against -- a variant was
+        # deleted -- so the saved analysis is the best answer available rather
+        # than a stale one.
+        "stale": bool(current_hash) and row.source_hash != current_hash,
+        "state": state,
+        "error": "",
+        **analysis,
     }
 
 
@@ -80,7 +86,7 @@ def refresh_courses() -> dict[str, Any]:
 def get_reading(
     application_id: int, session: Session = Depends(get_session)
 ) -> dict[str, Any]:
-    """The saved analysis, or 404 if it has never been run."""
+    """Whatever the queue has produced for this application so far."""
     app = session.get(Application, application_id)
     if app is None:
         raise HTTPException(404, "Application not found.")
@@ -88,18 +94,32 @@ def get_reading(
     row = session.exec(
         select(GapAnalysis).where(GapAnalysis.application_id == application_id)
     ).first()
-    if row is None:
-        raise HTTPException(404, "No analysis yet for this application.")
+    state = queue.state(application_id)
 
-    resume = _resume_for(session, application_id)
-    return _out(row, _source_hash(app.job_description, resume))
+    if row is None:
+        # Never having run is not an error -- it is the normal state of a job
+        # you added thirty seconds ago.
+        return {
+            "application_id": application_id,
+            "created_at": None,
+            "lesson_count": 0,
+            "stale": False,
+            "state": state,
+            "error": queue.error(application_id),
+            "gaps": [],
+            "covered": [],
+            "basics": [],
+            "note": "",
+        }
+
+    return _out(row, _current_hash(session, app), state)
 
 
 @router.post("/applications/{application_id}/reading")
 def run_reading(
     application_id: int, session: Session = Depends(get_session)
 ) -> dict[str, Any]:
-    """Run the comparison and save it against this application."""
+    """Run it now rather than waiting for the queue."""
     app = session.get(Application, application_id)
     if app is None:
         raise HTTPException(404, "Application not found.")
@@ -109,34 +129,30 @@ def run_reading(
             "Paste the job description for this application first — there is "
             "nothing to compare the resume against.",
         )
-
-    resume = _resume_for(session, application_id)
+    variant = session.exec(
+        select(Variant).where(Variant.application_id == application_id)
+    ).first()
+    if variant is None:
+        raise HTTPException(
+            404,
+            "Compose a resume for this application first — the analysis compares "
+            "the job description against the resume you intend to send.",
+        )
 
     try:
-        lessons = get_index()
+        analyse_now(application_id)
     except CourseIndexError as exc:
         raise HTTPException(502, str(exc)) from exc
-
-    try:
-        result = analyse(app.job_description, resume, lessons)
-    except GapError as exc:
+    except RuntimeError as exc:
+        # GapError and CliError both land here.
         raise HTTPException(502, str(exc)) from exc
 
     row = session.exec(
         select(GapAnalysis).where(GapAnalysis.application_id == application_id)
     ).first()
     if row is None:
-        row = GapAnalysis(application_id=application_id)
-
-    row.data = result.model_dump()
-    row.source_hash = _source_hash(app.job_description, resume)
-    row.lesson_count = len(lessons)
-    row.created_at = utcnow()
-    session.add(row)
-    session.commit()
-    session.refresh(row)
-
-    return _out(row, row.source_hash)
+        raise HTTPException(502, "The analysis produced no result.")
+    return _out(row, _current_hash(session, app), "idle")
 
 
 @router.delete("/applications/{application_id}/reading", status_code=204)

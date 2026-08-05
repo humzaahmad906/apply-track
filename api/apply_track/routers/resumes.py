@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,20 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/resumes", tags=["resumes"])
 
 MAX_UPLOAD_BYTES = 15 * 1024 * 1024
+
+# An upload is only needed until its parse finishes. Keeping a day of them is
+# enough to debug a bad extraction; keeping every resume ever uploaded is not.
+UPLOAD_MAX_AGE_SECONDS = 24 * 3600
+
+
+def _prune_uploads() -> None:
+    cutoff = time.time() - UPLOAD_MAX_AGE_SECONDS
+    for path in UPLOAD_DIR.glob("*"):
+        try:
+            if path.is_file() and path.stat().st_mtime < cutoff:
+                path.unlink()
+        except OSError as exc:
+            logger.warning("Could not remove old upload %s: %s", path, exc)
 
 
 class ResumeSave(BaseModel):
@@ -84,6 +99,7 @@ async def upload(background: BackgroundTasks, file: UploadFile) -> dict[str, str
         raise HTTPException(413, "File larger than 15 MB.")
 
     ensure_dirs()
+    _prune_uploads()
     # Never trust the client's filename for the path we write to.
     stored = UPLOAD_DIR / f"{uuid.uuid4().hex[:12]}{original.suffix.lower()}"
     stored.write_bytes(payload)

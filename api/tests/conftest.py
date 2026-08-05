@@ -6,6 +6,9 @@ import os
 import tempfile
 
 os.environ["APPLY_TRACK_DATA"] = tempfile.mkdtemp(prefix="apply-track-test-")
+# Saving a job description or a variant would otherwise schedule a real
+# analysis. Tests that want the queue build their own with it switched on.
+os.environ["APPLY_TRACK_AUTO_ANALYSE"] = "0"
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

@@ -115,7 +115,6 @@ export default function Composer() {
   const [previewVersion, setPreviewVersion] = useState(0);
   const [drawerTarget, setDrawerTarget] = useState<string | null>(null);
   const [showJd, setShowJd] = useState(false);
-  const [jd, setJd] = useState("");
   const [notice, setNotice] = useState<{ kind: string; text: string } | null>(null);
   const timer = useRef<number | null>(null);
 
@@ -140,27 +139,6 @@ export default function Composer() {
       setSavedSnapshot(JSON.stringify(variant.data.data));
     }
   }, [variant.data, draft]);
-
-  // Keep the JD box in step with whatever the server holds.
-  useEffect(() => {
-    if (application.data) setJd(application.data.job_description);
-  }, [application.data]);
-
-  const saveJd = useMutation({
-    mutationFn: () => api.patchApplication(appId, { job_description: jd }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["application", appId] });
-      queryClient.invalidateQueries({ queryKey: ["applications"] });
-      setNotice({ kind: "info", text: "Job description saved." });
-    },
-    onError: (err) =>
-      setNotice({
-        kind: "bad",
-        text: `Could not save the job description: ${
-          err instanceof ApiError ? err.message : String(err)
-        }`,
-      }),
-  });
 
   const dirty = useMemo(
     () => draft !== null && JSON.stringify(draft) !== savedSnapshot,
@@ -200,9 +178,11 @@ export default function Composer() {
     return () => {
       if (timer.current !== null) window.clearTimeout(timer.current);
     };
-    // scheduleSave is recreated per render; depending on `dirty` is what matters.
+    // save.isPending has to be a dependency: edits made while a save is in
+    // flight would otherwise never get their own save scheduled, because this
+    // effect would not re-run when the flight finished.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dirty, draft, title]);
+  }, [dirty, draft, title, save.isPending]);
 
   // Warn if the tab closes with the debounce still pending.
   useEffect(() => {
@@ -277,8 +257,8 @@ export default function Composer() {
   if (application.isError) {
     return (
       <div className="page">
-        <div className="banner bad">Application not found.</div>
-        <Link to="/">Back to applications</Link>
+        <div className="banner bad">That job is not here.</div>
+        <Link to="/">Back to the dashboard</Link>
       </div>
     );
   }
@@ -287,10 +267,10 @@ export default function Composer() {
     return (
       <div className="page">
         <div className="banner info">
-          This application has no tailored resume yet. Go back and pick a base
-          resume to fork from.
+          This job has no tailored resume yet. Pick a base resume to fork from
+          on the job page.
         </div>
-        <Link to="/">Back to applications</Link>
+        <Link to={`/jobs/${appId}`}>Back to the job</Link>
       </div>
     );
   }
@@ -298,8 +278,8 @@ export default function Composer() {
   if (!draft) {
     return (
       <div className="page">
-        <div className="banner bad">Could not load this variant.</div>
-        <Link to="/">Back to applications</Link>
+        <div className="banner bad">Could not load this resume.</div>
+        <Link to={`/jobs/${appId}`}>Back to the job</Link>
       </div>
     );
   }
@@ -314,8 +294,8 @@ export default function Composer() {
     <div className="composer">
       <div className="left">
         <div className="composer-bar">
-          <Link to="/" className="small">
-            ← Applications
+          <Link to={`/jobs/${appId}`} className="small">
+            ← {app.company}
           </Link>
           <span className="spacer" style={{ marginLeft: "auto" }} />
           <span className="muted small">
@@ -341,55 +321,36 @@ export default function Composer() {
 
         {notice && <div className={`banner ${notice.kind}`}>{notice.text}</div>}
 
+        {/* Read-only here on purpose: editing the description belongs on the
+            job page, and changing it re-runs the prep behind you. */}
         <div className="card tight">
           <div className="actions">
             <button
               type="button"
               className="ghost small"
+              disabled={!app.job_description}
               onClick={() => setShowJd((v) => !v)}
             >
               {showJd ? "Hide" : "Show"} job description
             </button>
-            <span className="muted small">
+            <span className="muted small grow">
               {app.job_description
                 ? `${app.job_description.length} chars`
                 : "none saved yet"}
             </span>
+            <Link to={`/jobs/${appId}`} className="small">
+              edit
+            </Link>
           </div>
           {showJd && (
-            <>
-              <textarea
-                className="small"
-                value={jd}
-                placeholder="Paste the job description here to keep it beside you while you tailor."
-                style={{ minHeight: 190, marginTop: 8 }}
-                onChange={(e) => setJd(e.target.value)}
-              />
-              <div className="actions" style={{ marginTop: 6 }}>
-                <button
-                  type="button"
-                  disabled={jd === app.job_description || saveJd.isPending}
-                  onClick={() => saveJd.mutate()}
-                >
-                  {saveJd.isPending ? "Saving…" : "Save job description"}
-                </button>
-                {jd !== app.job_description && (
-                  <button
-                    type="button"
-                    className="ghost small"
-                    onClick={() => setJd(app.job_description)}
-                  >
-                    Revert
-                  </button>
-                )}
-              </div>
-            </>
+            <pre className="jd-peek">{app.job_description}</pre>
           )}
         </div>
 
         <ReadingPanel
           applicationId={appId}
           hasJd={Boolean(app.job_description.trim())}
+          hasResume
         />
 
         <div className="card">
