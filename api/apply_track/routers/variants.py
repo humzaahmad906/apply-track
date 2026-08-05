@@ -18,6 +18,7 @@ from ..db import get_session
 from ..models import Application, Resume, Variant, utcnow
 from ..render import RenderError, render_html, render_pdf, safe_filename
 from ..schemas import ResumeJSON
+from ..tasks import queue
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["variants"])
@@ -92,6 +93,9 @@ def fork(
     session.add(variant)
     session.commit()
     session.refresh(variant)
+
+    # There is now a resume to compare the job description against.
+    queue.schedule(application_id)
     return _out(variant)
 
 
@@ -112,6 +116,10 @@ def update(
     session.add(variant)
     session.commit()
     session.refresh(variant)
+
+    # The composer autosaves constantly; the queue coalesces the storm into one
+    # analysis once the editing stops.
+    queue.schedule(variant.application_id)
     return _out(variant)
 
 

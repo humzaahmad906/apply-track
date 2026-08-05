@@ -63,7 +63,7 @@ export default function ResumeEditor({ mode }: { mode: "review" | "edit" }) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["resumes"] });
-      navigate("/resumes");
+      navigate("/material");
     },
     onError: (err) =>
       setError(err instanceof ApiError ? err.message : String(err)),
@@ -86,7 +86,7 @@ export default function ResumeEditor({ mode }: { mode: "review" | "edit" }) {
         <div className="banner bad">
           {job.data.error || `This parse job is ${job.data.status}.`}
         </div>
-        <button type="button" onClick={() => navigate("/resumes")}>
+        <button type="button" onClick={() => navigate("/material")}>
           Back to resumes
         </button>
       </div>
@@ -100,7 +100,7 @@ export default function ResumeEditor({ mode }: { mode: "review" | "edit" }) {
           Could not load this resume. The parse job may have expired — upload the
           file again.
         </div>
-        <button type="button" onClick={() => navigate("/resumes")}>
+        <button type="button" onClick={() => navigate("/material")}>
           Back to resumes
         </button>
       </div>
@@ -158,7 +158,7 @@ export default function ResumeEditor({ mode }: { mode: "review" | "edit" }) {
               ? "Save base resume"
               : "Save changes"}
         </button>
-        <button type="button" onClick={() => navigate("/resumes")}>
+        <button type="button" onClick={() => navigate("/material")}>
           Cancel
         </button>
       </div>

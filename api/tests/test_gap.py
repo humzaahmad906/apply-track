@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from apply_track import gap as mod
+from apply_track import cli
 from apply_track.courses import Lesson
 from apply_track.gap import GapError, _resume_digest, analyse
 from apply_track.schemas import ResumeJSON
@@ -28,18 +28,21 @@ LESSONS = [
     ),
 ]
 
+K8S = "content/kubernetes-for-ml/03-scheduling-and-autoscaling.md"
+TERRAFORM = "content/aws-for-ml/12b-terraform-for-aws.md"
+
 REPLY = {
     "gaps": [
         {
             "skill": "Kubernetes",
             "why": "Job wants autoscaled serving; resume shows none.",
-            "lessons": [
-                {"path": "content/kubernetes-for-ml/03-scheduling-and-autoscaling.md"}
-            ],
+            "lessons": [{"path": K8S}],
         }
     ],
-    "covered": [{"skill": "OCR", "evidence": "PackageX role"}],
-    "basics": ["Python", "Git"],
+    "covered": [
+        {"skill": "OCR", "evidence": "PackageX role", "lessons": [{"path": TERRAFORM}]}
+    ],
+    "basics": [{"skill": "Python", "lessons": [{"path": TERRAFORM}]}],
 }
 
 
@@ -62,8 +65,8 @@ def stub(monkeypatch, *responses: FakeCompleted) -> list[dict]:
         calls.append({"argv": argv, "input": kwargs.get("input", "")})
         return queue.pop(0) if queue else FakeCompleted(envelope("{}"))
 
-    monkeypatch.setattr(mod.subprocess, "run", fake_run)
-    monkeypatch.setattr(mod, "claude_argv", lambda args: ["claude", *args])
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+    monkeypatch.setattr(cli, "claude_argv", lambda args: ["claude", *args])
     return calls
 
 
@@ -79,7 +82,44 @@ def test_happy_path_returns_three_buckets(monkeypatch, resume: ResumeJSON):
 
     assert [g.skill for g in result.gaps] == ["Kubernetes"]
     assert [c.skill for c in result.covered] == ["OCR"]
-    assert result.basics == ["Python", "Git"]
+    assert [b.skill for b in result.basics] == ["Python"]
+
+
+def test_every_bucket_gets_lessons(monkeypatch, resume: ResumeJSON):
+    """Already knowing something is not a reason to withhold the reading."""
+    stub(monkeypatch, FakeCompleted(envelope(json.dumps(REPLY))))
+
+    result = analyse("Kubernetes required.", resume, LESSONS)
+
+    assert result.gaps[0].lessons[0].path == K8S
+    assert result.covered[0].lessons[0].path == TERRAFORM
+    assert result.basics[0].lessons[0].path == TERRAFORM
+
+
+def test_invented_paths_are_dropped_from_covered_and_basics_too(
+    monkeypatch, resume: ResumeJSON
+):
+    reply = json.loads(json.dumps(REPLY))
+    reply["covered"][0]["lessons"] = [{"path": "content/made-up/99-nope.md"}]
+    reply["basics"][0]["lessons"] = [{"path": "content/also-made-up/01-nope.md"}]
+    stub(monkeypatch, FakeCompleted(envelope(json.dumps(reply))))
+
+    result = analyse("Kubernetes required.", resume, LESSONS)
+
+    assert result.covered[0].lessons == []
+    assert result.basics[0].lessons == []
+
+
+def test_basics_saved_as_plain_strings_still_load(monkeypatch, resume: ResumeJSON):
+    """Analyses stored before basics carried lessons must still be readable."""
+    reply = json.loads(json.dumps(REPLY))
+    reply["basics"] = ["Python", "Git"]
+    stub(monkeypatch, FakeCompleted(envelope(json.dumps(reply))))
+
+    result = analyse("Kubernetes required.", resume, LESSONS)
+
+    assert [b.skill for b in result.basics] == ["Python", "Git"]
+    assert result.basics[0].lessons == []
 
 
 def test_lesson_metadata_comes_from_the_catalogue_not_the_model(

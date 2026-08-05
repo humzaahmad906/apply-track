@@ -89,6 +89,17 @@ export const APP_STATUSES: AppStatus[] = [
   "withdrawn",
 ];
 
+/** The five stages the board shows. Closed applications go to the archive. */
+export const ACTIVE_STATUSES: AppStatus[] = [
+  "wishlist",
+  "applied",
+  "screen",
+  "interview",
+  "offer",
+];
+
+export type AnalysisState = "idle" | "pending" | "running" | "error";
+
 export interface ApplicationRow {
   id: number;
   company: string;
@@ -97,10 +108,75 @@ export interface ApplicationRow {
   job_description: string;
   status: AppStatus;
   notes: string;
+  source: string;
   applied_at: string | null;
+  next_action: string;
+  next_action_at: string | null;
+  last_contact_at: string | null;
+  snoozed_until: string | null;
   created_at: string;
   updated_at: string;
   variant_id: number | null;
+  analysis: AnalysisState;
+}
+
+export interface StageEvent {
+  status: AppStatus;
+  at: string;
+  note: string;
+}
+
+/** One thing to do about one application. At most one per job, by design. */
+export interface Action {
+  application_id: number;
+  company: string;
+  role: string;
+  kind: string;
+  title: string;
+  detail: string;
+  urgency: number;
+  due: string | null;
+}
+
+export interface BoardCard {
+  id: number;
+  company: string;
+  role: string;
+  status: AppStatus;
+  job_url: string;
+  days_in_stage: number;
+  stage_since: string;
+  next_action: string;
+  next_action_at: string | null;
+  has_jd: boolean;
+  variant_id: number | null;
+  exported: boolean;
+  analysis: AnalysisState;
+  stage_index: number;
+  prep_gaps: number | null;
+  action_kind: string;
+  action_title: string;
+  action_detail: string;
+  urgency: number | null;
+  due: string | null;
+}
+
+export interface DashboardPayload {
+  stats: {
+    active: number;
+    sent: number;
+    replies: number;
+    reply_rate: number;
+    needs_action: number;
+    this_week: number;
+    weekly_goal: number;
+    streak: number;
+    offers: number;
+  };
+  funnel: { status: AppStatus; count: number }[];
+  actions: Action[];
+  board: Record<string, BoardCard[]>;
+  archive: BoardCard[];
 }
 
 export interface ResumeSummary {
@@ -161,18 +237,65 @@ export interface Gap {
 export interface CoveredSkill {
   skill: string;
   evidence: string;
+  lessons: Reading[];
+}
+
+/** A foundational requirement. Still gets reading — interviews go deeper. */
+export interface Foundation {
+  skill: string;
+  lessons: Reading[];
 }
 
 /** JD-versus-resume comparison. Study aid only — never rendered into the PDF. */
 export interface ReadingList {
   application_id: number;
-  created_at: string;
+  created_at: string | null;
   lesson_count: number;
   stale: boolean;
+  /** What the background queue is doing about this application right now. */
+  state: AnalysisState;
+  error: string;
   gaps: Gap[];
   covered: CoveredSkill[];
-  basics: string[];
+  basics: Foundation[];
   note: string;
+}
+
+export type BuildStatus = "idea" | "building" | "built";
+
+/** A portfolio project designed for one job. A plan until you mark it built. */
+export interface ProjectSpec {
+  application_id: number;
+  status: BuildStatus;
+  created_at: string;
+  mode: "design" | "reframe";
+  based_on: string;
+  title: string;
+  stack: string;
+  problem: string;
+  why_them: string;
+  architecture: { name: string; what: string; tech: string }[];
+  covers: { requirement: string; where: string }[];
+  milestones: { name: string; effort: string; outcome: string }[];
+  done_means: string;
+  bullets: string[];
+  risks: string;
+}
+
+export interface InterviewQuestion {
+  question: string;
+  tests: string;
+  anchor: string;
+  strong_answer: string;
+}
+
+export interface InterviewPrep {
+  application_id: number;
+  created_at: string;
+  stale: boolean;
+  rounds: { name: string; focus: string; questions: InterviewQuestion[] }[];
+  weak_spots: string[];
+  ask_them: string[];
 }
 
 export interface CourseIndex {
@@ -188,6 +311,8 @@ export interface Health {
   parse_model: string;
   pdf_export: boolean;
   pdf_export_error: string;
+  auto_analyse: boolean;
+  data_dir: string;
 }
 
 export class ApiError extends Error {
@@ -225,6 +350,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   health: () => request<Health>("/api/health"),
+
+  // --- the dashboard ------------------------------------------------------
+  dashboard: () => request<DashboardPayload>("/api/dashboard"),
+  timeline: (applicationId: number) =>
+    request<StageEvent[]>(`/api/applications/${applicationId}/timeline`),
 
   // --- flow one: parse a base resume -------------------------------------
   uploadResume(file: File) {
@@ -307,6 +437,25 @@ export const api = {
     request<ReadingList>(`/api/applications/${applicationId}/reading`, {
       method: "POST",
     }),
+
+  // --- what to build, and what they will ask -------------------------------
+  project: (id: number) => request<ProjectSpec>(`/api/applications/${id}/project`),
+  makeProject: (id: number) =>
+    request<ProjectSpec>(`/api/applications/${id}/project`, { method: "POST" }),
+  setProjectStatus: (id: number, status: BuildStatus) =>
+    request<{ status: BuildStatus }>(`/api/applications/${id}/project`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    }),
+  adoptProject: (id: number) =>
+    request<{ ok: boolean }>(`/api/applications/${id}/project/adopt`, {
+      method: "POST",
+    }),
+
+  interview: (id: number) =>
+    request<InterviewPrep>(`/api/applications/${id}/interview`),
+  makeInterview: (id: number) =>
+    request<InterviewPrep>(`/api/applications/${id}/interview`, { method: "POST" }),
 
   // --- reusable items -----------------------------------------------------
   listLibrary: () => request<LibraryRow[]>("/api/library"),

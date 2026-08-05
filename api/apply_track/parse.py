@@ -1,25 +1,19 @@
 """The one fuzzy step: resume text -> ResumeJSON, via the Claude Code CLI.
 
-Everything downstream of this module is deterministic. The whole prompt travels
-over stdin so nothing lands on argv, which keeps the Windows `cmd /c` shim free
-of quoting hazards.
+Everything downstream of this module is deterministic.
 """
 
 from __future__ import annotations
 
-import json
 import logging
-import re
-import subprocess
 
 from pydantic import ValidationError
 
-from .config import PARSE_MODEL, PARSE_TIMEOUT, claude_argv
+from . import cli
+from .config import PARSE_TIMEOUT
 from .schemas import ResumeJSON, assign_ids
 
 logger = logging.getLogger(__name__)
-
-_FENCE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$", re.MULTILINE)
 
 MAX_TEXT_CHARS = 60_000
 
@@ -121,9 +115,13 @@ def parse_resume(text: str) -> ResumeJSON:
 
     for attempt in (1, 2):
         prompt = f"{INSTRUCTIONS}{note}\n--- BEGIN RESUME ---\n{text}\n--- END RESUME ---\n"
-        raw = _run_cli(prompt)
         try:
-            resume = ResumeJSON.model_validate(_only_json(raw))
+            raw = cli.run(prompt, PARSE_TIMEOUT)
+        except cli.CliError as exc:
+            raise ParseError(str(exc)) from exc
+
+        try:
+            resume = ResumeJSON.model_validate(cli.only_json(raw))
         except (ValueError, ValidationError) as exc:
             last_error = exc
             logger.warning("Parse attempt %d rejected: %s", attempt, exc)
@@ -139,69 +137,3 @@ def parse_resume(text: str) -> ResumeJSON:
         return assign_ids(resume)
 
     raise ParseError(f"Could not extract sections: {last_error}") from last_error
-
-
-def _run_cli(prompt: str) -> str:
-    """Run one headless CLI turn and return the model's text."""
-    argv = claude_argv(
-        [
-            "-p",
-            "--output-format",
-            "json",
-            "--model",
-            PARSE_MODEL,
-            "--max-turns",
-            "1",
-        ]
-    )
-    try:
-        proc = subprocess.run(  # noqa: S603 -- fixed argv, no shell, content on stdin
-            argv,
-            input=prompt,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=PARSE_TIMEOUT,
-            check=False,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise ParseError(f"Claude CLI timed out after {PARSE_TIMEOUT}s") from exc
-    except OSError as exc:
-        raise ParseError(f"Could not launch the Claude CLI: {exc}") from exc
-
-    if proc.returncode != 0:
-        raise ParseError(
-            f"Claude CLI exited {proc.returncode}: "
-            f"{(proc.stderr or proc.stdout or '').strip()[:600]}"
-        )
-
-    try:
-        envelope = json.loads(proc.stdout)
-    except json.JSONDecodeError as exc:
-        raise ParseError(
-            f"Claude CLI returned non-JSON output: {proc.stdout.strip()[:600]}"
-        ) from exc
-
-    if envelope.get("is_error") or envelope.get("subtype") != "success":
-        detail = (
-            envelope.get("result")
-            or envelope.get("api_error_status")
-            or envelope.get("subtype")
-            or "unknown error"
-        )
-        raise ParseError(f"Claude CLI reported an error: {detail}")
-
-    result = envelope.get("result") or ""
-    if not result.strip():
-        raise ParseError("Claude CLI returned an empty result.")
-    return result
-
-
-def _only_json(raw: str) -> dict:
-    """Pull the JSON object out of the model's reply."""
-    cleaned = _FENCE.sub("", raw).strip()
-    start, end = cleaned.find("{"), cleaned.rfind("}")
-    if start == -1 or end <= start:
-        raise ValueError(f"No JSON object found in reply: {cleaned[:300]}")
-    return json.loads(cleaned[start : end + 1])

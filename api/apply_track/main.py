@@ -9,9 +9,25 @@ from typing import Any
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .config import CORS_ORIGINS, PARSE_MODEL, ClaudeCliNotFound, find_claude
+from .config import (
+    AUTO_ANALYSE,
+    CORS_ORIGINS,
+    DATA_DIR,
+    PARSE_MODEL,
+    ClaudeCliNotFound,
+    find_claude,
+)
 from .db import init_db
-from .routers import applications, coach, library, resumes, variants
+from .routers import (
+    applications,
+    coach,
+    dashboard,
+    library,
+    prep,
+    resumes,
+    variants,
+)
+from .tasks import warm_course_index
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,6 +44,7 @@ async def lifespan(app: FastAPI):
     except ClaudeCliNotFound as exc:
         # Parsing is one of two flows; everything else still works without it.
         logger.warning("%s Resume parsing will fail until this is fixed.", exc)
+    warm_course_index()
     yield
 
 
@@ -41,11 +58,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(dashboard.router)
 app.include_router(resumes.router)
 app.include_router(applications.router)
 app.include_router(variants.router)
 app.include_router(library.router)
 app.include_router(coach.router)
+app.include_router(prep.router)
 
 
 @app.get("/api/health")
@@ -83,4 +102,6 @@ def health() -> dict[str, Any]:
         "parse_model": PARSE_MODEL,
         "pdf_export": chromium,
         "pdf_export_error": chromium_error,
+        "auto_analyse": AUTO_ANALYSE,
+        "data_dir": str(DATA_DIR),
     }

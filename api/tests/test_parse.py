@@ -7,7 +7,7 @@ import subprocess
 
 import pytest
 
-from apply_track import parse
+from apply_track import cli
 from apply_track.parse import ParseError, parse_resume
 
 GOOD = {
@@ -44,8 +44,8 @@ def stub_cli(monkeypatch, *responses: FakeCompleted) -> list[dict]:
         calls.append({"argv": argv, "input": kwargs.get("input", "")})
         return queue.pop(0) if queue else FakeCompleted(envelope("{}"))
 
-    monkeypatch.setattr(parse.subprocess, "run", fake_run)
-    monkeypatch.setattr(parse, "claude_argv", lambda args: ["claude", *args])
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+    monkeypatch.setattr(cli, "claude_argv", lambda args: ["claude", *args])
     return calls
 
 
@@ -150,8 +150,8 @@ def test_timeout_is_surfaced(monkeypatch):
     def fake_run(argv, **kwargs):
         raise subprocess.TimeoutExpired(cmd=argv, timeout=1)
 
-    monkeypatch.setattr(parse.subprocess, "run", fake_run)
-    monkeypatch.setattr(parse, "claude_argv", lambda args: ["claude", *args])
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+    monkeypatch.setattr(cli, "claude_argv", lambda args: ["claude", *args])
 
     with pytest.raises(ParseError, match="timed out"):
         parse_resume("text")

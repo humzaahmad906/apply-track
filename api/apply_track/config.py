@@ -28,6 +28,23 @@ COURSE_BRANCH = os.environ.get("APPLY_TRACK_COURSE_BRANCH", "main")
 # Gap analysis sends the whole lesson catalogue, so it needs a longer budget.
 GAP_TIMEOUT = int(os.environ.get("APPLY_TRACK_GAP_TIMEOUT", "420"))
 
+# The analysis runs itself. Set to 0 to make it a manual step again; the test
+# suite does exactly that so it never reaches for the CLI.
+AUTO_ANALYSE = os.environ.get("APPLY_TRACK_AUTO_ANALYSE", "1").lower() not in {
+    "0",
+    "false",
+    "no",
+}
+
+# Quiet period between the last edit and the analysis. The composer autosaves
+# every 1.2s, so this is the whole reason a long tailoring session costs one
+# CLI call rather than several hundred.
+ANALYSE_DELAY = float(os.environ.get("APPLY_TRACK_ANALYSE_DELAY", "30"))
+
+# How stale the lesson catalogue may get before it is refetched in the
+# background, so nobody ever waits on GitHub mid-analysis.
+COURSE_MAX_AGE_DAYS = int(os.environ.get("APPLY_TRACK_COURSE_MAX_AGE_DAYS", "14"))
+
 CORS_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
