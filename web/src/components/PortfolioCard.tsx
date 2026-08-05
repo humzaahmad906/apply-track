@@ -4,6 +4,14 @@ import { useEffect, useState } from "react";
 import { api, ApiError } from "../api/client";
 import { Check, External } from "../icons";
 
+/** Same shape the server refuses, so nothing surprises you on submit. */
+const PLACEHOLDER = /<[A-Za-z][A-Za-z0-9 _/+-]*>/g;
+
+function placeholdersIn(...text: string[]): string[] {
+  const found = text.join(" ").match(PLACEHOLDER) ?? [];
+  return [...new Set(found)];
+}
+
 /**
  * Put the project on humzaahmad906.github.io.
  *
@@ -23,8 +31,20 @@ export default function PortfolioCard({
   const [blurb, setBlurb] = useState("");
   const [tags, setTags] = useState("");
   const [section, setSection] = useState("featured");
+  const [fills, setFills] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
+
+  const pending = placeholdersIn(title, blurb);
+
+  /** Substitute one number everywhere it appears, then drop the field. */
+  const apply = (slot: string) => {
+    const value = (fills[slot] ?? "").trim();
+    if (!value) return;
+    setTitle((t) => t.split(slot).join(value));
+    setBlurb((b) => b.split(slot).join(value));
+    setFills(({ [slot]: _drop, ...rest }) => rest);
+  };
 
   const state = useQuery({
     queryKey: ["portfolio", applicationId],
@@ -127,11 +147,54 @@ export default function PortfolioCard({
         />
       </label>
 
+      {/* The generated bullets carry a slot per measurement. Rather than
+          refusing the card and sending you back to the text, ask for the
+          numbers — they are the only thing missing. */}
+      {pending.length > 0 && (
+        <div className="fills">
+          <strong className="small">
+            {pending.length} number{pending.length === 1 ? "" : "s"} to fill in
+          </strong>
+          <p className="faint small">
+            Only you have these. They go in everywhere the slot appears.
+          </p>
+          {pending.map((slot) => (
+            <label className="fill" key={slot}>
+              <code>{slot}</code>
+              <input
+                value={fills[slot] ?? ""}
+                placeholder="the real number"
+                onChange={(e) =>
+                  setFills((f) => ({ ...f, [slot]: e.target.value }))
+                }
+                onBlur={() => apply(slot)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    apply(slot);
+                  }
+                }}
+              />
+            </label>
+          ))}
+        </div>
+      )}
+
       <div className="actions wrap">
         <button
           type="button"
           className="primary"
-          disabled={publish.isPending || !title.trim() || !blurb.trim()}
+          disabled={
+            publish.isPending ||
+            !title.trim() ||
+            !blurb.trim() ||
+            pending.length > 0
+          }
+          title={
+            pending.length > 0
+              ? "Fill in the numbers first — they would show as <slots> on the page"
+              : "Write the card into projects.html"
+          }
           onClick={() => publish.mutate()}
         >
           {publish.isPending ? "Writing…" : "Add to portfolio"}
