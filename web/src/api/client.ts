@@ -447,9 +447,18 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ status }),
     }),
-  adoptProject: (id: number) =>
-    request<{ ok: boolean }>(`/api/applications/${id}/project/adopt`, {
+  adoptProject: (
+    id: number,
+    body: { item_id?: string | null; bullets?: string[]; add_skills?: boolean },
+  ) =>
+    request<{
+      ok: boolean;
+      landed_in: string;
+      bullets_added: number;
+      skills_added: string[];
+    }>(`/api/applications/${id}/project/adopt`, {
       method: "POST",
+      body: JSON.stringify(body),
     }),
 
   interview: (id: number) =>

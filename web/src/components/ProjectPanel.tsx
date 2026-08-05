@@ -24,16 +24,38 @@ const STATUS_LABEL: Record<BuildStatus, string> = {
  */
 export default function ProjectPanel({
   applicationId,
+  variantId,
   hasJd,
   hasResume,
 }: {
   applicationId: number;
+  variantId: number | null;
   hasJd: boolean;
   hasResume: boolean;
 }) {
   const queryClient = useQueryClient();
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
+  const [target, setTarget] = useState<string>("");
+  const [picked, setPicked] = useState<Set<string> | null>(null);
+  const [addSkills, setAddSkills] = useState(true);
+
+  // The entries this could be folded into, newest role first.
+  const variant = useQuery({
+    queryKey: ["variant", variantId],
+    queryFn: () => api.variant(variantId!),
+    enabled: variantId !== null,
+  });
+
+  const destinations = (variant.data?.data.sections ?? [])
+    .filter((s) => s.kind === "experience" || s.kind === "projects")
+    .flatMap((s) =>
+      s.items.map((i) => ({
+        id: i.id,
+        label: [i.title, i.subtitle].filter(Boolean).join(" — ") || "(untitled)",
+        kind: s.kind,
+      })),
+    );
 
   const project = useQuery<ProjectSpec>({
     queryKey: ["project", applicationId],
@@ -57,16 +79,53 @@ export default function ProjectPanel({
       queryClient.invalidateQueries({ queryKey: ["project", applicationId] }),
   });
 
+  const landed = (result: {
+    landed_in: string;
+    bullets_added: number;
+    skills_added: string[];
+  }) => {
+    setError("");
+    const skills = result.skills_added.length
+      ? ` ${result.skills_added.length} new skill tag${
+          result.skills_added.length === 1 ? "" : "s"
+        }: ${result.skills_added.join(", ")}.`
+      : "";
+    setNote(
+      `${result.bullets_added} line${result.bullets_added === 1 ? "" : "s"} added ` +
+        `under ${result.landed_in}.${skills} Tune the wording in the composer.`,
+    );
+    queryClient.invalidateQueries({ queryKey: ["project", applicationId] });
+    queryClient.invalidateQueries({ queryKey: ["application", applicationId] });
+    queryClient.invalidateQueries({ queryKey: ["reading", applicationId] });
+    // The composer holds the variant in cache and autosaves the whole tree.
+    // Without this it would reopen on the pre-adopt copy and quietly write
+    // the project back out again.
+    queryClient.invalidateQueries({ queryKey: ["variant"] });
+  };
+
+  const failed = (err: unknown) =>
+    setError(err instanceof ApiError ? err.message : String(err));
+
+  const body = () => ({
+    item_id: target || null,
+    bullets: picked === null ? undefined : [...picked],
+    add_skills: addSkills,
+  });
+
   const adopt = useMutation({
-    mutationFn: () => api.adoptProject(applicationId),
-    onSuccess: () => {
-      setError("");
-      setNote("Added to this job's resume. Edit the wording in the composer.");
-      queryClient.invalidateQueries({ queryKey: ["application", applicationId] });
-      queryClient.invalidateQueries({ queryKey: ["reading", applicationId] });
+    mutationFn: () => api.adoptProject(applicationId, body()),
+    onSuccess: landed,
+    onError: failed,
+  });
+
+  /** One click for the common case: it exists now, put it on the resume. */
+  const buildAndAdopt = useMutation({
+    mutationFn: async () => {
+      await api.setProjectStatus(applicationId, "built");
+      return api.adoptProject(applicationId, body());
     },
-    onError: (err) =>
-      setError(err instanceof ApiError ? err.message : String(err)),
+    onSuccess: landed,
+    onError: failed,
   });
 
   const spec = project.data;
@@ -211,34 +270,120 @@ export default function ProjectPanel({
             </>
           )}
 
-          <div className="actions" style={{ marginTop: 12, flexWrap: "wrap" }}>
-            <button
-              type="button"
-              className={spec.status === "built" ? "primary" : ""}
-              disabled={spec.status !== "built" || adopt.isPending}
-              title={
-                spec.status === "built"
-                  ? "Add it to this job's resume"
-                  : "Mark it built first — an interviewer will ask about it"
-              }
-              onClick={() => adopt.mutate()}
-            >
-              Add to this resume
-            </button>
-            <button
-              type="button"
-              className="ghost small"
-              disabled={make.isPending}
-              onClick={() => make.mutate()}
-            >
-              Design a different one
-            </button>
+          {/* Where it lands. Folding it into a role you already have reads as
+              work you did there; its own Projects entry reads as your own
+              time. Pick whichever is true. */}
+          <h3 className="mini-head">Put it on the resume</h3>
+          <div className="adopt">
+            <label className="field">
+              <span>Add it under</span>
+              <select value={target} onChange={(e) => setTarget(e.target.value)}>
+                <option value="">A new entry under Projects</option>
+                {destinations.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.kind === "experience" ? "Role: " : "Project: "}
+                    {d.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <div className="field">
+              <span>Lines to add</span>
+              {spec.bullets.map((b) => {
+                const on = picked === null || picked.has(b);
+                return (
+                  <label key={b} className="pick">
+                    <input
+                      type="checkbox"
+                      checked={on}
+                      onChange={() =>
+                        setPicked((prev) => {
+                          const next = new Set(prev ?? spec.bullets);
+                          if (next.has(b)) next.delete(b);
+                          else next.add(b);
+                          return next;
+                        })
+                      }
+                    />
+                    <span>{b}</span>
+                  </label>
+                );
+              })}
+            </div>
+
+            <label className="pick">
+              <input
+                type="checkbox"
+                checked={addSkills}
+                onChange={(e) => setAddSkills(e.target.checked)}
+              />
+              <span>
+                Also add its stack to your Skills tags
+                {spec.stack ? ` (${spec.stack})` : ""}
+              </span>
+            </label>
           </div>
-          {spec.status !== "built" && (
-            <p className="faint small" style={{ marginBottom: 0 }}>
-              Placeholders like &lt;throughput&gt; get real numbers once you have
-              measured them.
-            </p>
+
+          {spec.status === "built" ? (
+            <div className="actions" style={{ marginTop: 12, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                className="primary"
+                disabled={adopt.isPending}
+                onClick={() => adopt.mutate()}
+              >
+                {adopt.isPending ? "Adding…" : "Add to this resume"}
+              </button>
+              <button
+                type="button"
+                className="ghost small"
+                disabled={make.isPending}
+                onClick={() => make.mutate()}
+              >
+                Design a different one
+              </button>
+            </div>
+          ) : (
+            /* The gate needs to say what it wants. A greyed-out button with the
+               reason hidden in a tooltip just reads as broken. */
+            <div className="gate">
+              <strong>Built it yet?</strong>
+              <p className="muted small">
+                It goes on the resume once it exists. Interview prep drills into
+                everything on there, and the bullets still have placeholders
+                like &lt;throughput&gt; waiting on real numbers.
+              </p>
+              <div className="actions wrap">
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={buildAndAdopt.isPending}
+                  onClick={() => buildAndAdopt.mutate()}
+                >
+                  {buildAndAdopt.isPending
+                    ? "Adding…"
+                    : "I have built it — add it"}
+                </button>
+                {spec.status === "idea" && (
+                  <button
+                    type="button"
+                    disabled={setStatus.isPending}
+                    onClick={() => setStatus.mutate("building")}
+                  >
+                    Started on it
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="ghost small"
+                  disabled={make.isPending}
+                  onClick={() => make.mutate()}
+                >
+                  Design a different one
+                </button>
+              </div>
+            </div>
           )}
         </>
       )}

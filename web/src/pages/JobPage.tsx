@@ -426,6 +426,7 @@ export default function JobPage() {
 
       <ProjectPanel
         applicationId={appId}
+        variantId={app.variant_id}
         hasJd={hasJd}
         hasResume={app.variant_id !== null}
       />

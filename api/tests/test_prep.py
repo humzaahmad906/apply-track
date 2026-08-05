@@ -187,6 +187,145 @@ def test_a_built_project_lands_in_the_resume(
     assert "Conveyor-belt label reader" in html
 
 
+def built_project(client: TestClient, sample_resume: dict, company: str, monkeypatch):
+    app_id = ready_job(client, sample_resume, company)
+    stub(monkeypatch, PROJECT)
+    client.post(f"/api/applications/{app_id}/project")
+    client.patch(f"/api/applications/{app_id}/project", json={"status": "built"})
+    return app_id
+
+
+def resume_of(client: TestClient, app_id: int) -> dict:
+    variant_id = client.get(f"/api/applications/{app_id}").json()["variant_id"]
+    return client.get(f"/api/variants/{variant_id}").json()["data"]
+
+
+def test_it_can_fold_into_a_role_you_already_have(
+    client: TestClient, sample_resume: dict, monkeypatch
+):
+    """Work done inside a job belongs on that job, not in a Projects appendix."""
+    app_id = built_project(client, sample_resume, "Fold Co", monkeypatch)
+    before = resume_of(client, app_id)
+    role = before["sections"][0]["items"][0]
+
+    res = client.post(
+        f"/api/applications/{app_id}/project/adopt",
+        json={"item_id": role["id"], "bullets": ["Shipped it end to end."]},
+    )
+
+    assert res.status_code == 200, res.text
+    assert res.json()["landed_in"] == role["title"]
+    after = resume_of(client, app_id)
+    assert [b["text"] for b in after["sections"][0]["items"][0]["bullets"]][-1] == (
+        "Shipped it end to end."
+    )
+    # And it did not also create a Projects section.
+    assert not any(s["kind"] == "projects" for s in after["sections"])
+
+
+def test_the_stack_is_merged_into_the_skills_tags(
+    client: TestClient, sample_resume: dict, monkeypatch
+):
+    app_id = built_project(client, sample_resume, "Tagged Co", monkeypatch)
+    role_id = resume_of(client, app_id)["sections"][0]["items"][0]["id"]
+
+    added = client.post(
+        f"/api/applications/{app_id}/project/adopt",
+        json={"item_id": role_id, "add_skills": True},
+    ).json()["skills_added"]
+
+    assert "Kubernetes" in added
+    skills = next(s for s in resume_of(client, app_id)["sections"] if s["kind"] == "skills")
+    tags = skills["items"][0]["tags"]
+    # The originals survive and nothing is duplicated.
+    assert "Mathematics" in tags
+    assert len(tags) == len({t.lower() for t in tags})
+
+
+def test_skills_can_be_left_alone(
+    client: TestClient, sample_resume: dict, monkeypatch
+):
+    app_id = built_project(client, sample_resume, "Untagged Co", monkeypatch)
+    role_id = resume_of(client, app_id)["sections"][0]["items"][0]["id"]
+
+    res = client.post(
+        f"/api/applications/{app_id}/project/adopt",
+        json={"item_id": role_id, "add_skills": False},
+    )
+
+    assert res.json()["skills_added"] == []
+
+
+def test_folding_the_same_lines_twice_adds_them_once(
+    client: TestClient, sample_resume: dict, monkeypatch
+):
+    app_id = built_project(client, sample_resume, "Once Co", monkeypatch)
+    role_id = resume_of(client, app_id)["sections"][0]["items"][0]["id"]
+    body = {"item_id": role_id, "bullets": ["Shipped it end to end."]}
+
+    client.post(f"/api/applications/{app_id}/project/adopt", json=body)
+    client.post(f"/api/applications/{app_id}/project/adopt", json=body)
+
+    bullets = [b["text"] for b in resume_of(client, app_id)["sections"][0]["items"][0]["bullets"]]
+    assert bullets.count("Shipped it end to end.") == 1
+
+
+def test_folding_into_a_deleted_entry_is_a_404(
+    client: TestClient, sample_resume: dict, monkeypatch
+):
+    app_id = built_project(client, sample_resume, "Gone Co", monkeypatch)
+
+    res = client.post(
+        f"/api/applications/{app_id}/project/adopt",
+        json={"item_id": "no-such-item"},
+    )
+
+    assert res.status_code == 404
+
+
+def test_adopting_twice_replaces_rather_than_duplicates(
+    client: TestClient, sample_resume: dict, monkeypatch
+):
+    app_id = ready_job(client, sample_resume, "Twice Co")
+    stub(monkeypatch, PROJECT)
+    client.post(f"/api/applications/{app_id}/project")
+    client.patch(f"/api/applications/{app_id}/project", json={"status": "built"})
+
+    client.post(f"/api/applications/{app_id}/project/adopt")
+    client.post(f"/api/applications/{app_id}/project/adopt")
+
+    variant_id = client.get(f"/api/applications/{app_id}").json()["variant_id"]
+    data = client.get(f"/api/variants/{variant_id}").json()["data"]
+    projects = next(s for s in data["sections"] if s["kind"] == "projects")
+    assert len(projects["items"]) == 1
+
+
+def test_redesigning_then_adopting_updates_the_same_entry(
+    client: TestClient, sample_resume: dict, monkeypatch
+):
+    app_id = ready_job(client, sample_resume, "Redesign Co")
+    stub(monkeypatch, PROJECT)
+    client.post(f"/api/applications/{app_id}/project")
+    client.patch(f"/api/applications/{app_id}/project", json={"status": "built"})
+    client.post(f"/api/applications/{app_id}/project/adopt")
+
+    # Same title, different bullets -- the entry is rewritten in place.
+    revised = json.loads(json.dumps(PROJECT))
+    revised["bullets"] = ["A sharper single bullet."]
+    stub(monkeypatch, revised)
+    client.post(f"/api/applications/{app_id}/project")
+    client.patch(f"/api/applications/{app_id}/project", json={"status": "built"})
+    client.post(f"/api/applications/{app_id}/project/adopt")
+
+    variant_id = client.get(f"/api/applications/{app_id}").json()["variant_id"]
+    data = client.get(f"/api/variants/{variant_id}").json()["data"]
+    projects = next(s for s in data["sections"] if s["kind"] == "projects")
+    assert len(projects["items"]) == 1
+    assert [b["text"] for b in projects["items"][0]["bullets"]] == [
+        "A sharper single bullet."
+    ]
+
+
 def test_an_unknown_status_is_refused(
     client: TestClient, sample_resume: dict, monkeypatch
 ):

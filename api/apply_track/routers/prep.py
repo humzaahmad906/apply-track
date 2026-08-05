@@ -26,7 +26,7 @@ from ..models import (
     utcnow,
 )
 from ..projects import ProjectError, propose
-from ..schemas import Item, ResumeJSON, new_id
+from ..schemas import Bullet, Item, ResumeJSON, Section
 from ..tasks import queue
 
 logger = logging.getLogger(__name__)
@@ -37,6 +37,51 @@ BUILD_STATES = ("idea", "building", "built")
 
 class StatusIn(BaseModel):
     status: str
+
+
+class AdoptIn(BaseModel):
+    """Where the project goes and how much of it.
+
+    item_id folds it into an entry that already exists -- normally the role you
+    built it in, so it reads as work rather than a bolted-on side project. Left
+    empty it becomes its own entry under Projects.
+    """
+
+    item_id: str | None = None
+    bullets: list[str] = []  # empty means all of them
+    add_skills: bool = True
+
+
+def _find_item(resume: ResumeJSON, item_id: str) -> Item | None:
+    for section in resume.sections:
+        for item in section.items:
+            if item.id == item_id:
+                return item
+    return None
+
+
+def _merge_skills(resume: ResumeJSON, stack: str) -> list[str]:
+    """Fold the project's stack into the skills tags, keeping what is there."""
+    wanted = [t.strip() for t in stack.split(",") if t.strip()]
+    if not wanted:
+        return []
+
+    section = next((s for s in resume.sections if s.kind == "skills"), None)
+    if section is None:
+        section = Section(kind="skills", title="Skills", items=[])
+        resume.sections.append(section)
+    if not section.items:
+        section.items.append(Item())
+
+    target = section.items[0]
+    have = {t.strip().lower() for t in target.tags}
+    added = []
+    for tag in wanted:
+        if tag.lower() not in have:
+            target.tags.append(tag)
+            have.add(tag.lower())
+            added.append(tag)
+    return added
 
 
 def _job(session: Session, application_id: int) -> Application:
@@ -150,9 +195,16 @@ def set_project_status(
 
 @router.post("/{application_id}/project/adopt")
 def adopt_project(
-    application_id: int, session: Session = Depends(get_session)
+    application_id: int,
+    payload: AdoptIn | None = None,
+    session: Session = Depends(get_session),
 ) -> dict[str, Any]:
-    """Put the project onto this job's resume, once it exists."""
+    """Put the project onto this job's resume, once it exists.
+
+    With no body it does the simple thing: every bullet, its own entry under
+    Projects, skills merged.
+    """
+    payload = payload or AdoptIn()
     row = session.exec(
         select(ProjectPitch).where(ProjectPitch.application_id == application_id)
     ).first()
@@ -171,21 +223,43 @@ def adopt_project(
 
     spec = row.data or {}
     resume = ResumeJSON.model_validate(variant.data or {})
+    lines = payload.bullets or list(spec.get("bullets", []))
 
-    item = Item(
-        title=spec.get("title", "Project"),
-        subtitle=spec.get("stack", ""),
-        description=spec.get("problem", ""),
-        bullets=[{"text": b} for b in spec.get("bullets", [])],  # type: ignore[list-item]
-    )
+    if payload.item_id:
+        # Into a role you already have, as extra bullets on that job.
+        item = _find_item(resume, payload.item_id)
+        if item is None:
+            raise HTTPException(404, "That resume entry is no longer there.")
+        have = {b.text.strip() for b in item.bullets}
+        added = [t for t in lines if t.strip() and t.strip() not in have]
+        item.bullets.extend(Bullet(text=t) for t in added)
+        landed_in, added_bullets = item.title or item.subtitle, len(added)
+    else:
+        # Or as its own entry under Projects.
+        section = next((s for s in resume.sections if s.kind == "projects"), None)
+        if section is None:
+            section = Section(kind="projects", title="Projects", items=[])
+            resume.sections.append(section)
 
-    section = next((s for s in resume.sections if s.kind == "projects"), None)
-    if section is None:
-        from ..schemas import Section
+        entry = Item(
+            title=spec.get("title", "Project"),
+            subtitle=spec.get("stack", ""),
+            description=spec.get("problem", ""),
+            bullets=[Bullet(text=t) for t in lines],
+        )
+        # Adopting twice, or again after a redesign, rewrites the entry rather
+        # than stacking up near-identical copies.
+        at = next(
+            (i for i, x in enumerate(section.items) if x.title == entry.title), None
+        )
+        if at is None:
+            section.items.append(entry)
+        else:
+            entry.id = section.items[at].id
+            section.items[at] = entry
+        landed_in, added_bullets = "Projects", len(lines)
 
-        section = Section(kind="projects", title="Projects", items=[])
-        resume.sections.append(section)
-    section.items.append(item)
+    skills = _merge_skills(resume, spec.get("stack", "")) if payload.add_skills else []
 
     variant.data = resume.model_dump()
     variant.updated_at = utcnow()
@@ -194,7 +268,12 @@ def adopt_project(
 
     # The resume just changed, so the prep is out of date.
     queue.schedule(application_id)
-    return {"ok": True, "item_id": item.id}
+    return {
+        "ok": True,
+        "landed_in": landed_in,
+        "bullets_added": added_bullets,
+        "skills_added": skills,
+    }
 
 
 @router.delete("/{application_id}/project", status_code=204)
