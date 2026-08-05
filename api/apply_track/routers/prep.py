@@ -14,6 +14,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
+from .. import portfolio
+from ..config import SITE_DIR
 from ..db import get_session
 from ..gap import source_hash
 from ..interview import InterviewError, prepare
@@ -274,6 +276,69 @@ def adopt_project(
         "bullets_added": added_bullets,
         "skills_added": skills,
     }
+
+
+class PublishIn(BaseModel):
+    """A card is public writing, so every part of it is editable first."""
+
+    section: str = "featured"
+    title: str
+    blurb: str
+    tags: str = ""
+
+
+@router.post("/{application_id}/project/portfolio")
+def publish_project(
+    application_id: int,
+    payload: PublishIn,
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Add the project to the portfolio site, uncommitted for review."""
+    row = session.exec(
+        select(ProjectPitch).where(ProjectPitch.application_id == application_id)
+    ).first()
+    if row is None:
+        raise HTTPException(404, "No project designed for this job yet.")
+    if row.status != "built":
+        raise HTTPException(
+            409, "Mark the project built first — the site says you shipped it."
+        )
+
+    try:
+        return portfolio.publish(
+            payload.title, payload.blurb, payload.tags, payload.section
+        )
+    except portfolio.PortfolioError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.get("/{application_id}/project/portfolio")
+def portfolio_state(
+    application_id: int, session: Session = Depends(get_session)
+) -> dict[str, Any]:
+    """Site status, plus the card this project would start from."""
+    app = _job(session, application_id)
+    row = session.exec(
+        select(ProjectPitch).where(ProjectPitch.application_id == application_id)
+    ).first()
+    spec = (row.data or {}) if row else {}
+    title = spec.get("title", "")
+
+    state: dict[str, Any] = {
+        "path": str(SITE_DIR),
+        "title": title,
+        "blurb": portfolio.default_blurb(spec),
+        "tags": portfolio.default_tags(spec.get("stack", "")),
+    }
+    try:
+        state["published"] = bool(title) and portfolio.already_there(title)
+        state["available"] = True
+        state["error"] = ""
+    except portfolio.PortfolioError as exc:
+        state["published"] = False
+        state["available"] = False
+        state["error"] = str(exc)
+    return state
 
 
 @router.delete("/{application_id}/project", status_code=204)

@@ -8,6 +8,7 @@ import {
   type ProjectSpec,
 } from "../api/client";
 import { ArrowRight, Check, Lightbulb, Target } from "../icons";
+import PortfolioCard from "./PortfolioCard";
 
 const STATUS_LABEL: Record<BuildStatus, string> = {
   idea: "Just an idea",
@@ -324,6 +325,11 @@ export default function ProjectPanel({
               </span>
             </label>
           </div>
+
+          <PortfolioCard
+            applicationId={applicationId}
+            built={spec.status === "built"}
+          />
 
           {spec.status === "built" ? (
             <div className="actions" style={{ marginTop: 12, flexWrap: "wrap" }}>

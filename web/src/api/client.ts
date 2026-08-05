@@ -461,6 +461,25 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
+  portfolioState: (id: number) =>
+    request<{
+      available: boolean;
+      path: string;
+      published: boolean;
+      error: string;
+      title: string;
+      blurb: string;
+      tags: string;
+    }>(`/api/applications/${id}/project/portfolio`),
+  publishToPortfolio: (
+    id: number,
+    body: { section: string; title: string; blurb: string; tags: string },
+  ) =>
+    request<{ ok: boolean; path: string; section: string; title: string }>(
+      `/api/applications/${id}/project/portfolio`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+
   interview: (id: number) =>
     request<InterviewPrep>(`/api/applications/${id}/interview`),
   makeInterview: (id: number) =>

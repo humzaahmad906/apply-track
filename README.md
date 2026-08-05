@@ -115,6 +115,27 @@ date, because it is then asking about a document you are no longer sending.
 Both of these are buttons rather than background work: you build one project in
 ten applications and you only prep for an interview you actually have.
 
+## Portfolio
+
+Once a project is marked built it can also go on
+[the site](https://humzaahmad906.github.io/projects/). It writes one card into
+`projects.html` in the same markup the page already uses, under Featured or
+Earlier work, and **leaves it uncommitted** so the diff gets read before
+anything is public.
+
+Title, tags and description are all editable first, because the generated
+wording is sized for a resume bullet rather than a portfolio card — and because
+a card is public writing. Two guards:
+
+- **Unfilled placeholders are refused.** `<throughput>` is a useful reminder on
+  a resume and an embarrassment on a public page.
+- **Tags do not default to the company you are applying to.** Tagging a
+  personal project "Northbay" would imply the work was done for them; add the
+  real organisation yourself when it belongs to a job.
+
+Point `APPLY_TRACK_SITE` at the checkout; it defaults to
+`~/humzaahmad906.github.io`.
+
 ## Requirements
 
 - **Python 3.11+**
@@ -250,6 +271,7 @@ Environment variables, all optional:
 | `APPLY_TRACK_AUTO_ANALYSE` | `1` | Set to `0` to make prep a manual step again |
 | `APPLY_TRACK_ANALYSE_DELAY` | `30` | Quiet period, in seconds, before an edit triggers prep |
 | `APPLY_TRACK_COURSE_MAX_AGE_DAYS` | `14` | How stale the lesson catalogue may get |
+| `APPLY_TRACK_SITE` | `~/humzaahmad906.github.io` | Portfolio checkout a built project can be published into |
 
 ## Tests
 

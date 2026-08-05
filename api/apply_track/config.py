@@ -45,6 +45,12 @@ ANALYSE_DELAY = float(os.environ.get("APPLY_TRACK_ANALYSE_DELAY", "30"))
 # background, so nobody ever waits on GitHub mid-analysis.
 COURSE_MAX_AGE_DAYS = int(os.environ.get("APPLY_TRACK_COURSE_MAX_AGE_DAYS", "14"))
 
+# Local checkout of the portfolio site a built project can be published into.
+# Writes land uncommitted; pushing stays a human decision.
+SITE_DIR = Path(
+    os.environ.get("APPLY_TRACK_SITE", Path.home() / "humzaahmad906.github.io")
+)
+
 CORS_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
